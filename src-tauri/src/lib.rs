@@ -45,6 +45,8 @@ struct AppState {
     capture_active: Mutex<bool>,
     /// 窗口逻辑可见状态（与 is_visible 解耦，避免异步隐藏/线程竞态导致状态错乱）
     window_shown: AtomicBool,
+    /// 结果卡片展示中：期间禁用"失焦自动隐藏"（用户可能切去别处对照/粘贴）
+    result_open: AtomicBool,
 }
 
 // ---------------- 持久化（本地 JSON，零依赖） ----------------
@@ -453,6 +455,11 @@ fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
     }
 }
 
+#[tauri::command]
+fn set_result_open(state: State<'_, AppState>, open: bool) {
+    state.result_open.store(open, Ordering::SeqCst);
+}
+
 // ---------------- 视图尺寸切换（扫码 ⇄ 设置） ----------------
 
 /// 视图动画代数：新的切换使旧动画失效
@@ -543,6 +550,7 @@ pub fn run() {
             settings: Mutex::new(Settings::default()),
             capture_active: Mutex::new(false),
             window_shown: AtomicBool::new(false),
+            result_open: AtomicBool::new(false),
         })
         .invoke_handler(tauri::generate_handler![
             get_settings,
@@ -555,7 +563,8 @@ pub fn run() {
             exit_capture_mode,
             get_autostart,
             set_autostart,
-            set_view
+            set_view,
+            set_result_open
         ])
         .setup(|app| {
             let handle = app.handle();
@@ -595,9 +604,11 @@ pub fn run() {
         })
         .on_window_event(|window, event| match event {
             WindowEvent::Focused(false) => {
-                // 截屏框选期间或窗口逻辑上已隐藏时不处理；否则失焦 800ms 后自动收起
+                // 截屏框选期间、结果展示中或窗口逻辑上已隐藏时不处理；
+                // 否则失焦 800ms 后自动收起
                 let state = window.app_handle().state::<AppState>();
                 if *state.capture_active.lock().unwrap()
+                    || state.result_open.load(Ordering::SeqCst)
                     || !state.window_shown.load(Ordering::SeqCst)
                 {
                     return;

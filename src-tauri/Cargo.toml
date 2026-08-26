@@ -1,6 +1,6 @@
 [package]
 name = "quickscan"
-version = "0.1.0"
+version = "0.1.1"
 description = "轻量桌面二维码扫码工具"
 authors = ["quickscan"]
 edition = "2021"

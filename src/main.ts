@@ -300,12 +300,13 @@ function showResult(entry: ScanResult): void {
   btnOpen.classList.toggle("hidden", entry.kind !== "url");
   resultSheet.classList.add("show");
   resultSheet.setAttribute("aria-hidden", "false");
+  void invoke("set_result_open", { open: true });
 }
 
 function hideResult(): void {
   resultSheet.classList.remove("show");
   resultSheet.setAttribute("aria-hidden", "true");
-  autoHideBar.classList.remove("running");
+  void invoke("set_result_open", { open: false });
 }
 
 function showCaptureResult(entry: ScanResult): void {
@@ -313,12 +314,14 @@ function showCaptureResult(entry: ScanResult): void {
   cBtnOpen.classList.toggle("hidden", entry.kind !== "url");
   cResultSheet.classList.add("show");
   cResultSheet.setAttribute("aria-hidden", "false");
+  void invoke("set_result_open", { open: true });
 }
 
 function hideCaptureResult(): void {
   cResultSheet.classList.remove("show");
   cResultSheet.setAttribute("aria-hidden", "true");
   cAutoHideBar.classList.remove("running");
+  void invoke("set_result_open", { open: false });
 }
 
 function formatWifi(text: string): string {
@@ -333,17 +336,6 @@ function scheduleAutoHide(fromCapture: boolean): void {
   const bar = (fromCapture ? cAutoHideBar : autoHideBar).querySelector("i")!;
   bar.style.animationDuration = `${secs}s`;
   (fromCapture ? cAutoHideBar : autoHideBar).classList.add("running");
-  bar.addEventListener(
-    "animationend",
-    () => {
-      if (fromCapture) {
-        void exitCapture();
-      } else {
-        void hideWindow();
-      }
-    },
-    { once: true },
-  );
   hideTimer = window.setTimeout(() => {
     if (fromCapture) void exitCapture();
     else void hideWindow();
@@ -353,16 +345,20 @@ function scheduleAutoHide(fromCapture: boolean): void {
 function clearHideTimer(): void {
   window.clearTimeout(hideTimer);
   hideTimer = 0;
+  // 同步停掉进度条动画：被中断的动画跑完会残留结束态，也无法再触发意外退出
+  autoHideBar.classList.remove("running");
+  cAutoHideBar.classList.remove("running");
 }
 
 async function copyNow(text: string, silent = false, fromCapture = false): Promise<void> {
   try {
     await invoke("copy_text", { text });
     if (!silent) toast("已复制到剪贴板");
+    // 自动复制模式也留出看结果的时间
     window.setTimeout(() => {
       if (fromCapture) void exitCapture();
       else void hideWindow();
-    }, silent ? 200 : 700);
+    }, silent ? 900 : 700);
   } catch {
     toast("复制失败");
   }
@@ -705,6 +701,10 @@ function bindEvents(): void {
   canvas.addEventListener("pointerdown", onPointerDown);
   window.addEventListener("pointermove", onPointerMove);
   window.addEventListener("pointerup", () => void onPointerUp());
+
+  // 悬停结果卡即取消自动收起：给用户足够时间阅读和点击
+  resultSheet.addEventListener("mouseenter", clearHideTimer);
+  cResultSheet.addEventListener("mouseenter", clearHideTimer);
 }
 
 // ---------------- 启动 ----------------
