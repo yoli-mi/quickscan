@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="src-tauri/icons/icon.png" width="128" alt="QuickScan" />
+  <img src="https://raw.githubusercontent.com/yoli-mi/quickscan/main/src-tauri/icons/icon.png" width="128" alt="QuickScan" />
 </p>
 
 # QuickScan · 轻量桌面扫码工具
