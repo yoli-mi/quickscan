@@ -23,7 +23,6 @@ struct Settings {
     hotkey: String,
     auto_copy: bool,
     sound: bool,
-    auto_hide_seconds: u32,
     always_on_top: bool,
 }
 
@@ -33,7 +32,6 @@ impl Default for Settings {
             hotkey: DEFAULT_HOTKEY.into(),
             auto_copy: false,
             sound: true,
-            auto_hide_seconds: 5,
             always_on_top: true,
         }
     }
@@ -329,9 +327,6 @@ fn set_setting(
     match key.as_str() {
         "autoCopy" => s.auto_copy = value.as_bool().unwrap_or(s.auto_copy),
         "sound" => s.sound = value.as_bool().unwrap_or(s.sound),
-        "autoHideSeconds" => {
-            s.auto_hide_seconds = value.as_u64().unwrap_or(s.auto_hide_seconds as u64) as u32
-        }
         "alwaysOnTop" => {
             s.always_on_top = value.as_bool().unwrap_or(s.always_on_top);
             if let Some(w) = app.get_webview_window("main") {

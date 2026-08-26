@@ -37,7 +37,6 @@
             <button class="btn primary" id="btn-copy">复制</button>
             <button class="btn secondary hidden" id="btn-open">在浏览器打开</button>
           </div>
-          <div class="auto-hide" id="auto-hide"><i></i></div>
         </section>
       </main>
     </div>
@@ -88,24 +87,6 @@
           </div>
           <button class="switch" id="sw-autostart" role="switch" aria-label="开机自启动"></button>
         </div>
-        <div class="setting-row">
-          <div class="setting-label">
-            自动收起
-            <small>结果展示后自动隐藏窗口</small>
-          </div>
-          <div class="dropdown" id="dd-hide">
-            <button class="dd-btn" id="dd-hide-btn" aria-haspopup="listbox">
-              <span id="dd-hide-label">5 秒</span>
-              <svg viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4.5L6 8l3.5-3.5"/></svg>
-            </button>
-            <div class="dd-menu" id="dd-hide-menu" role="listbox">
-              <button class="dd-item" data-v="0" role="option">不自动收起</button>
-              <button class="dd-item" data-v="3" role="option">3 秒</button>
-              <button class="dd-item" data-v="5" role="option">5 秒</button>
-              <button class="dd-item" data-v="10" role="option">10 秒</button>
-            </div>
-          </div>
-        </div>
       </div>
       <footer class="settings-foot" data-tauri-drag-region="deep">QuickScan v0.1 · 轻量桌面扫码工具</footer>
     </section>
@@ -135,7 +116,6 @@
           <button class="btn primary" id="c-btn-copy">复制</button>
           <button class="btn secondary hidden" id="c-btn-open">在浏览器打开</button>
         </div>
-        <div class="auto-hide" id="c-auto-hide"><i></i></div>
       </section>
     </div>
 

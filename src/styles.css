@@ -337,30 +337,9 @@ body.window-visible .glass-shell {
   gap: 8px;
 }
 
-.auto-hide {
-  margin-top: 10px;
-  height: 2px;
-  border-radius: 1px;
-  background: var(--chip-bg);
-  overflow: hidden;
-}
 
-.auto-hide i {
-  display: block;
-  height: 100%;
-  width: 100%;
-  background: var(--accent);
-  transform-origin: left;
-  transform: scaleX(0);
-}
 
-.auto-hide.running i {
-  animation: shrink linear forwards;
-}
 
-@keyframes shrink {
-  to { transform: scaleX(0); }
-}
 
 /* ---------------- 全屏框选层 ---------------- */
 
@@ -526,79 +505,6 @@ body.capturing * {
   font-weight: 400;
   color: var(--text-2);
 }
-
-/* ---------------- 自绘下拉（自动收起等） ---------------- */
-
-.dropdown {
-  position: relative;
-}
-
-.dd-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 11px;
-  border: none;
-  border-radius: 8px;
-  background: var(--field-bg);
-  color: var(--text-1);
-  font-size: 12px;
-  font-weight: 500;
-  font-family: inherit;
-  font-variant-numeric: tabular-nums;
-  transition: background 120ms, box-shadow 150ms;
-}
-
-.dd-btn:hover { background: var(--chip-hover); }
-
-.dropdown.open .dd-btn {
-  background: var(--chip-hover);
-  box-shadow: 0 0 0 2px var(--accent);
-}
-
-.dd-btn svg { opacity: 0.55; transition: transform 180ms var(--spring-in); }
-
-.dropdown.open .dd-btn svg { transform: rotate(180deg); }
-
-.dd-menu {
-  position: absolute;
-  top: calc(100% + 7px);
-  right: 0;
-  z-index: 60;
-  min-width: 132px;
-  padding: 4px;
-  border-radius: 12px;
-  background: var(--panel-bg);
-  border: 1px solid var(--glass-border);
-  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.16);
-  transform-origin: top right;
-  opacity: 0;
-  transform: scale(0.88) translateY(-5px);
-  pointer-events: none;
-  transition:
-    opacity 150ms ease-out,
-    transform 220ms var(--spring-pop);
-}
-
-.dropdown.open .dd-menu {
-  opacity: 1;
-  transform: none;
-  pointer-events: auto;
-}
-
-.dd-item {
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: 7px 11px;
-  border-radius: 8px;
-  font-size: 12px;
-  color: var(--text-1);
-  transition: background 100ms;
-}
-
-.dd-item:hover { background: var(--chip-bg); }
-.dd-item.sel { color: var(--accent); font-weight: 600; }
 
 /* 快捷键捕获按钮：点击后按下组合键即生效 */
 .hotkey-capture {

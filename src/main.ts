@@ -15,7 +15,6 @@ interface Settings {
   hotkey: string;
   autoCopy: boolean;
   sound: boolean;
-  autoHideSeconds: number;
   alwaysOnTop: boolean;
 }
 
@@ -27,7 +26,6 @@ const btnCapture = $<HTMLButtonElement>("btn-capture");
 const resultSheet = $("result-sheet");
 const resultType = $("result-type");
 const resultContent = $("result-content");
-const autoHideBar = $("auto-hide");
 const btnCopy = $("btn-copy");
 const btnOpen = $("btn-open");
 const scanApp = $("app");
@@ -49,7 +47,6 @@ const maskRight = $("mask-right");
 const cResultSheet = $("capture-result");
 const cResultType = $("c-result-type");
 const cResultContent = $("c-result-content");
-const cAutoHideBar = $("c-auto-hide");
 const cBtnCopy = $("c-btn-copy");
 const cBtnOpen = $("c-btn-open");
 
@@ -60,11 +57,9 @@ let settings: Settings = {
   hotkey: "Ctrl+Alt+Q",
   autoCopy: false,
   sound: true,
-  autoHideSeconds: 5,
   alwaysOnTop: true,
 };
 
-let hideTimer = 0;
 let audioCtx: AudioContext | null = null;
 
 // ---- 框选状态 ----
@@ -157,7 +152,6 @@ function resetCapture(): void {
   selRect.style.height = "0px";
   hideMasks();
   hideCaptureResult();
-  clearHideTimer();
   // 释放全屏截图画布（约 8MB 位图），下次进入重绘
   canvas.width = 1;
   canvas.height = 1;
@@ -270,10 +264,9 @@ function onDetected(text: string, fromCapture: boolean): void {
   } else {
     showResult(entry);
   }
+  // 结果页不自动消失，由用户手动关闭（复制/打开/×/Esc）
   if (settings.autoCopy) {
     void copyNow(entry.content, true, fromCapture);
-  } else {
-    scheduleAutoHide(fromCapture);
   }
 }
 
@@ -320,7 +313,6 @@ function showCaptureResult(entry: ScanResult): void {
 function hideCaptureResult(): void {
   cResultSheet.classList.remove("show");
   cResultSheet.setAttribute("aria-hidden", "true");
-  cAutoHideBar.classList.remove("running");
   void invoke("set_result_open", { open: false });
 }
 
@@ -329,36 +321,11 @@ function formatWifi(text: string): string {
   return m ? `WiFi 名称：${m[1]}` : text;
 }
 
-function scheduleAutoHide(fromCapture: boolean): void {
-  clearHideTimer();
-  const secs = settings.autoHideSeconds;
-  if (secs <= 0) return;
-  const bar = (fromCapture ? cAutoHideBar : autoHideBar).querySelector("i")!;
-  bar.style.animationDuration = `${secs}s`;
-  (fromCapture ? cAutoHideBar : autoHideBar).classList.add("running");
-  hideTimer = window.setTimeout(() => {
-    if (fromCapture) void exitCapture();
-    else void hideWindow();
-  }, secs * 1000);
-}
-
-function clearHideTimer(): void {
-  window.clearTimeout(hideTimer);
-  hideTimer = 0;
-  // 同步停掉进度条动画：被中断的动画跑完会残留结束态，也无法再触发意外退出
-  autoHideBar.classList.remove("running");
-  cAutoHideBar.classList.remove("running");
-}
-
-async function copyNow(text: string, silent = false, fromCapture = false): Promise<void> {
+async function copyNow(text: string, silent = false, _fromCapture = false): Promise<void> {
   try {
     await invoke("copy_text", { text });
     if (!silent) toast("已复制到剪贴板");
-    // 自动复制模式也留出看结果的时间
-    window.setTimeout(() => {
-      if (fromCapture) void exitCapture();
-      else void hideWindow();
-    }, silent ? 900 : 700);
+    // 复制后结果页保留，由用户手动关闭
   } catch {
     toast("复制失败");
   }
@@ -475,18 +442,6 @@ function syncSettingsUI(): void {
   setSwitch($("sw-autocopy"), settings.autoCopy);
   setSwitch($("sw-sound"), settings.sound);
   setSwitch($("sw-pin"), settings.alwaysOnTop);
-  syncHideDropdown();
-}
-
-function hideLabelFor(secs: number): string {
-  return secs === 0 ? "不自动收起" : `${secs} 秒`;
-}
-
-function syncHideDropdown(): void {
-  $("dd-hide-label").textContent = hideLabelFor(settings.autoHideSeconds);
-  document.querySelectorAll<HTMLButtonElement>("#dd-hide-menu .dd-item").forEach((item) => {
-    item.classList.toggle("sel", Number(item.dataset.v) === settings.autoHideSeconds);
-  });
 }
 
 function setSwitch(el: HTMLElement, on: boolean): void {
@@ -601,24 +556,6 @@ function bindEvents(): void {
       toast(String(err));
     }
   });
-  // 自动收起：自绘下拉
-  const ddHide = $("dd-hide");
-  $("dd-hide-btn").addEventListener("click", (e) => {
-    e.stopPropagation();
-    ddHide.classList.toggle("open");
-  });
-  document.querySelectorAll<HTMLButtonElement>("#dd-hide-menu .dd-item").forEach((item) => {
-    item.addEventListener("click", () => {
-      void setSetting("autoHideSeconds", Number(item.dataset.v)).then(() => {
-        syncHideDropdown();
-        toast(`自动收起：${hideLabelFor(settings.autoHideSeconds)}`);
-      });
-      ddHide.classList.remove("open");
-    });
-  });
-  document.addEventListener("click", (e) => {
-    if (!ddHide.contains(e.target as Node)) ddHide.classList.remove("open");
-  });
 
   // 快捷键：点击捕获 —— 按下组合键立即生效，无需保存
   hotkeyBtn.addEventListener("click", () => {
@@ -656,10 +593,6 @@ function bindEvents(): void {
         void exitCapture();
       }
     } else {
-      if ($("dd-hide").classList.contains("open")) {
-        $("dd-hide").classList.remove("open");
-        return;
-      }
       if (!settingsPage.hidden) {
         showSettings(false);
         return;
@@ -701,10 +634,6 @@ function bindEvents(): void {
   canvas.addEventListener("pointerdown", onPointerDown);
   window.addEventListener("pointermove", onPointerMove);
   window.addEventListener("pointerup", () => void onPointerUp());
-
-  // 悬停结果卡即取消自动收起：给用户足够时间阅读和点击
-  resultSheet.addEventListener("mouseenter", clearHideTimer);
-  cResultSheet.addEventListener("mouseenter", clearHideTimer);
 }
 
 // ---------------- 启动 ----------------
