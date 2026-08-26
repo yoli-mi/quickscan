@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="src-tauri/icons/icon.png" width="128" alt="QuickScan" />
+</p>
+
 # QuickScan · 轻量桌面扫码工具
 
 [English](#english) | 中文
@@ -41,8 +45,6 @@ npm run tauri dev     # 开发（热更新）
 npm run tauri build   # 打包 NSIS / MSI 安装包
 ```
 
-> 国内环境建议配置 rsproxy.cn 镜像加速 cargo，并将 rustup 安装到纯 ASCII 路径。
-
 ---
 
 <a name="english"></a>
@@ -51,14 +53,14 @@ npm run tauri build   # 打包 NSIS / MSI 安装包
 
 中文 | [English](#english)
 
-A tray-resident QR code scanner: press a hotkey, **frame-select any QR code on your screen** — on web pages, in chat windows, inside images — and get the result instantly, ready to copy or open. **No phone, no browser, nearly zero footprint.**
+A tray-resident QR code scanner. Press a hotkey, **frame-select** any QR code on your screen — web pages, chat windows, images — then copy or open it with one click.
 
 ## Usage
 
-1. Press `Ctrl+Alt+Q` (customizable) to summon the widget
+1. After launching, press `Ctrl+Alt+Q` (default hotkey) to summon the widget
 2. Click "Capture & Scan" — the screen enters selection mode
-3. Drag to frame the QR code → decoded instantly
-4. Result card: copy / open in browser; auto-collapse (configurable)
+3. Drag to frame the QR code and it is decoded automatically
+4. A result card pops up: copy / open in browser; auto-collapse (configurable)
 
 You can also paste (`Ctrl+V`) or drag an image with a QR code onto the widget.
 
@@ -67,8 +69,7 @@ You can also paste (`Ctrl+V`) or drag an image with a QR code onto the widget.
 - **Screen-capture selection**: fullscreen overlay with drag selection (live size hint), decode on release
 - Auto classification: URL / Wi-Fi / text; one-click copy and open-in-browser
 - **Global hotkey** to show/hide (default `Ctrl+Alt+Q`; in settings, click and press a new combo — applied instantly)
-- Apple-style motion: pops in from the tray corner, collapses back along the mirrored path
-- Dedicated settings page: auto-copy, sound, always-on-top, launch at startup, auto-hide
+- Minimalist motion design
 - Tray icon: left-click to summon; right-click menu (show / settings / quit)
 - Paste / drag-image decoding; light/dark theme follows the system
 
@@ -90,5 +91,3 @@ npm install
 npm run tauri dev     # dev mode (HMR)
 npm run tauri build   # build NSIS / MSI installers
 ```
-
-
