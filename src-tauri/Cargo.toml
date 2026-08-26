@@ -1,0 +1,33 @@
+[package]
+name = "quickscan"
+version = "0.1.0"
+description = "轻量桌面二维码扫码工具"
+authors = ["quickscan"]
+edition = "2021"
+
+[lib]
+name = "quickscan_lib"
+# 仅桌面端：rlib 即可；cdylib 的 DLL 导出表在 GNU 工具链下会触发
+# ld "export ordinal too large"（见 windows crate 与 GNU ld 的兼容性问题）
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["protocol-asset", "tray-icon"] }
+tauri-plugin-opener = "2"
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-global-shortcut = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+xcap = "0.9.8"
+tauri-plugin-single-instance = "2.4.3"
+tauri-plugin-autostart = "2"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

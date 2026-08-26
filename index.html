@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>QuickScan</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <!-- ============ 小部件视图 ============ -->
+    <div id="app" class="glass-shell">
+      <!-- 顶栏（拖拽区域） -->
+      <header class="titlebar" data-tauri-drag-region="deep">
+        <img class="app-icon" src="/src/assets/app-icon.png" alt="QuickScan" draggable="false" />
+        <div class="title">扫码</div>
+        <div class="hotkey-hint" id="hotkey-hint">Ctrl+Alt+Q</div>
+      </header>
+
+      <!-- 主区：截屏扫码入口（空白处可拖拽窗口） -->
+      <main class="hero" id="hero" data-tauri-drag-region="deep">
+        <div class="hero-frame">
+          <i class="corner tl"></i><i class="corner tr"></i
+          ><i class="corner bl"></i><i class="corner br"></i>
+          <div class="scan-line"></div>
+        </div>
+        <button class="btn primary big" id="btn-capture">截屏扫码</button>
+        <p class="hero-hint">框选屏幕上任意二维码，立即识别</p>
+
+        <!-- 小部件结果卡片（图片粘贴识别用） -->
+        <section class="result-sheet" id="result-sheet" aria-hidden="true">
+          <div class="result-head">
+            <span class="type-chip" id="result-type">链接</span>
+            <button class="icon-btn" id="result-close" title="关闭">×</button>
+          </div>
+          <div class="result-content" id="result-content"></div>
+          <div class="result-actions">
+            <button class="btn primary" id="btn-copy">复制</button>
+            <button class="btn secondary hidden" id="btn-open">在浏览器打开</button>
+          </div>
+          <div class="auto-hide" id="auto-hide"><i></i></div>
+        </section>
+      </main>
+    </div>
+
+    <!-- ============ 设置页（独立整页，不依附扫码页） ============ -->
+    <section id="settings-page" class="glass-shell settings" hidden>
+      <header class="titlebar" data-tauri-drag-region="deep">
+        <button class="back-btn" id="btn-back" title="返回" aria-label="返回">
+          <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9.5 3.5L5 8l4.5 4.5" />
+          </svg>
+        </button>
+        <div class="title">设置</div>
+      </header>
+      <div class="settings-body">
+        <div class="setting-row">
+          <div class="setting-label">
+            呼出快捷键
+            <small>点击右侧后按下新组合键</small>
+          </div>
+          <button class="hotkey-capture" id="hotkey-btn" title="点击后按下新组合键，Esc 取消">Ctrl+Alt+Q</button>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            自动复制
+            <small>识别成功后直接写入剪贴板</small>
+          </div>
+          <button class="switch" id="sw-autocopy" role="switch" aria-label="自动复制"></button>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            提示音
+            <small>识别成功播放轻提示音</small>
+          </div>
+          <button class="switch" id="sw-sound" role="switch" aria-label="提示音"></button>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            窗口置顶
+            <small>扫码时悬浮在其他窗口之上</small>
+          </div>
+          <button class="switch" id="sw-pin" role="switch" aria-label="窗口置顶"></button>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            开机自启动
+            <small>登录 Windows 后自动运行</small>
+          </div>
+          <button class="switch" id="sw-autostart" role="switch" aria-label="开机自启动"></button>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            自动收起
+            <small>结果展示后自动隐藏窗口</small>
+          </div>
+          <div class="dropdown" id="dd-hide">
+            <button class="dd-btn" id="dd-hide-btn" aria-haspopup="listbox">
+              <span id="dd-hide-label">5 秒</span>
+              <svg viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4.5L6 8l3.5-3.5"/></svg>
+            </button>
+            <div class="dd-menu" id="dd-hide-menu" role="listbox">
+              <button class="dd-item" data-v="0" role="option">不自动收起</button>
+              <button class="dd-item" data-v="3" role="option">3 秒</button>
+              <button class="dd-item" data-v="5" role="option">5 秒</button>
+              <button class="dd-item" data-v="10" role="option">10 秒</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <footer class="settings-foot" data-tauri-drag-region="deep">QuickScan v0.1 · 轻量桌面扫码工具</footer>
+    </section>
+
+    <!-- ============ 全屏框选视图 ============ -->
+    <div class="capture-overlay" id="capture-overlay" hidden>
+      <canvas id="capture-canvas"></canvas>
+      <div class="mask" id="mask-top"></div>
+      <div class="mask" id="mask-bottom"></div>
+      <div class="mask" id="mask-left"></div>
+      <div class="mask" id="mask-right"></div>
+      <div class="sel-rect" id="sel-rect">
+        <i class="corner tl"></i><i class="corner tr"></i
+        ><i class="corner bl"></i><i class="corner br"></i>
+        <span class="sel-size" id="sel-size"></span>
+      </div>
+      <div class="capture-tip">拖拽框选屏幕上的二维码 · Esc 退出</div>
+
+      <!-- 框选结果卡片 -->
+      <section class="result-sheet capture-result" id="capture-result" aria-hidden="true">
+        <div class="result-head">
+          <span class="type-chip" id="c-result-type">链接</span>
+          <button class="icon-btn" id="c-result-close" title="关闭">×</button>
+        </div>
+        <div class="result-content" id="c-result-content"></div>
+        <div class="result-actions">
+          <button class="btn primary" id="c-btn-copy">复制</button>
+          <button class="btn secondary hidden" id="c-btn-open">在浏览器打开</button>
+        </div>
+        <div class="auto-hide" id="c-auto-hide"><i></i></div>
+      </section>
+    </div>
+
+    <div class="toast" id="toast" role="status"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
