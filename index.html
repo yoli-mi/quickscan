@@ -50,45 +50,88 @@
           </svg>
         </button>
         <div class="title">设置</div>
+        <span class="settings-brand">QuickScan</span>
       </header>
       <div class="settings-body">
-        <div class="setting-row">
-          <div class="setting-label">
-            呼出快捷键
-            <small>点击右侧后按下新组合键</small>
+        <div class="group-label">扫码</div>
+        <div class="settings-card">
+          <div class="setting-row">
+            <span class="setting-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+            </span>
+            <div class="setting-label">
+              自动复制
+              <small>识别成功后直接写入剪贴板</small>
+            </div>
+            <button class="switch" id="sw-autocopy" role="switch" aria-label="自动复制"></button>
           </div>
-          <button class="hotkey-capture" id="hotkey-btn" title="点击后按下新组合键，Esc 取消">Ctrl+Alt+Q</button>
+          <div class="setting-row">
+            <span class="setting-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M18 15v-4a6 6 0 1 0-12 0v4l-2 3h16z"/><path d="M10 21h4"/></svg>
+            </span>
+            <div class="setting-label">
+              提示音
+              <small>识别成功播放轻提示音</small>
+            </div>
+            <button class="switch" id="sw-sound" role="switch" aria-label="提示音"></button>
+          </div>
+          <div class="setting-row">
+            <span class="setting-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg>
+            </span>
+            <div class="setting-label">
+              自动扫码
+              <small>截屏后自动识别屏幕上全部二维码</small>
+            </div>
+            <button class="switch" id="sw-autoscan" role="switch" aria-label="自动扫码"></button>
+          </div>
+          <div class="setting-row">
+            <span class="setting-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></svg>
+            </span>
+            <div class="setting-label">
+              跳转后自动退出
+              <small>打开链接后自动退出扫码界面</small>
+            </div>
+            <button class="switch" id="sw-openexit" role="switch" aria-label="跳转后自动退出"></button>
+          </div>
         </div>
-        <div class="setting-row">
-          <div class="setting-label">
-            自动复制
-            <small>识别成功后直接写入剪贴板</small>
+
+        <div class="group-label">系统</div>
+        <div class="settings-card">
+          <div class="setting-row">
+            <span class="setting-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6"/></svg>
+            </span>
+            <div class="setting-label">
+              呼出快捷键
+              <small>点击右侧后按下新组合键</small>
+            </div>
+            <button class="hotkey-capture" id="hotkey-btn" title="点击后按下新组合键，Esc 取消">Ctrl+Alt+Q</button>
           </div>
-          <button class="switch" id="sw-autocopy" role="switch" aria-label="自动复制"></button>
-        </div>
-        <div class="setting-row">
-          <div class="setting-label">
-            提示音
-            <small>识别成功播放轻提示音</small>
+          <div class="setting-row">
+            <span class="setting-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 17v5M9 3h6l1 7 3 3H5l3-3z"/></svg>
+            </span>
+            <div class="setting-label">
+              窗口置顶
+              <small>扫码时悬浮在其他窗口之上</small>
+            </div>
+            <button class="switch" id="sw-pin" role="switch" aria-label="窗口置顶"></button>
           </div>
-          <button class="switch" id="sw-sound" role="switch" aria-label="提示音"></button>
-        </div>
-        <div class="setting-row">
-          <div class="setting-label">
-            窗口置顶
-            <small>扫码时悬浮在其他窗口之上</small>
+          <div class="setting-row">
+            <span class="setting-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 3v8"/><path d="M6 6a8 8 0 1 0 12 0"/></svg>
+            </span>
+            <div class="setting-label">
+              开机自启动
+              <small>登录 Windows 后自动运行</small>
+            </div>
+            <button class="switch" id="sw-autostart" role="switch" aria-label="开机自启动"></button>
           </div>
-          <button class="switch" id="sw-pin" role="switch" aria-label="窗口置顶"></button>
-        </div>
-        <div class="setting-row">
-          <div class="setting-label">
-            开机自启动
-            <small>登录 Windows 后自动运行</small>
-          </div>
-          <button class="switch" id="sw-autostart" role="switch" aria-label="开机自启动"></button>
         </div>
       </div>
-      <footer class="settings-foot" data-tauri-drag-region="deep">QuickScan v0.1 · 轻量桌面扫码工具</footer>
+      <footer class="settings-foot" data-tauri-drag-region="deep">QuickScan v0.2.0 · 轻量桌面扫码工具</footer>
     </section>
 
     <!-- ============ 全屏框选视图 ============ -->
@@ -116,6 +159,19 @@
           <button class="btn primary" id="c-btn-copy">复制</button>
           <button class="btn secondary hidden" id="c-btn-open">在浏览器打开</button>
         </div>
+      </section>
+    </div>
+
+    <!-- 自动扫码多结果视图 -->
+    <div class="multi-view" id="multi-view" hidden>
+      <div class="qr-markers" id="qr-markers"></div>
+      <section class="multi-panel">
+        <div class="multi-head">
+          <span>识别到 <b id="multi-count">0</b> 个二维码</span>
+          <button class="icon-btn" id="multi-close" title="关闭 (Esc)">×</button>
+        </div>
+        <ul class="multi-list" id="multi-list"></ul>
+        <div class="multi-foot">点击「复制」获取内容 · 悬停可定位对应二维码 · Esc 退出</div>
       </section>
     </div>
 

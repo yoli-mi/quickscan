@@ -1,7 +1,7 @@
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
-import jsQR from "jsqr";
+import { readBarcodes } from "zxing-wasm/reader";
 
 type Kind = "url" | "wifi" | "text";
 
@@ -16,6 +16,8 @@ interface Settings {
   autoCopy: boolean;
   sound: boolean;
   alwaysOnTop: boolean;
+  autoScan: boolean;
+  openExit: boolean;
 }
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -34,6 +36,10 @@ const hotkeyHint = $("hotkey-hint");
 const hotkeyBtn = $("hotkey-btn");
 let hotkeyCapturing = false;
 const toastEl = $("toast");
+const multiView = $("multi-view");
+const qrMarkers = $("qr-markers");
+const multiList = $("multi-list");
+const multiCount = $("multi-count");
 
 // ---- 全屏框选 ----
 const overlay = $("capture-overlay");
@@ -57,6 +63,8 @@ let settings: Settings = {
   hotkey: "Ctrl+Alt+Q",
   autoCopy: false,
   sound: true,
+  autoScan: false,
+  openExit: false,
   alwaysOnTop: true,
 };
 
@@ -132,6 +140,18 @@ async function beginCapture(path: string, w: number, h: number): Promise<void> {
     const ctx = canvas.getContext("2d")!;
     const imageData = new ImageData(new Uint8ClampedArray(buf), capW, capH);
     ctx.putImageData(imageData, 0, 0);
+    // 自动扫码：全屏识别所有二维码，多结果视图逐一定位
+    if (settings.autoScan) {
+      const found = await scanAll();
+      if (found.length === 0) {
+        toast("未在屏幕上发现二维码");
+        await exitCapture();
+        return;
+      }
+      // 单码也用居中面板（带位置标记），不占满底部
+      showMultiResults(found);
+      return;
+    }
   } catch (err) {
     console.error("capture failed:", err);
     toast(`截屏失败：${err instanceof Error ? err.message : String(err)}`);
@@ -152,6 +172,7 @@ function resetCapture(): void {
   selRect.style.height = "0px";
   hideMasks();
   hideCaptureResult();
+  hideMultiResults();
   // 释放全屏截图画布（约 8MB 位图），下次进入重绘
   canvas.width = 1;
   canvas.height = 1;
@@ -187,7 +208,7 @@ function updateMasks(): void {
 }
 
 function onPointerDown(e: PointerEvent): void {
-  if (!captureActive || cResultSheet.classList.contains("show")) return;
+  if (!captureActive || cResultSheet.classList.contains("show") || !multiView.hidden) return;
   drag.x0 = e.clientX;
   drag.y0 = e.clientY;
   drag.x = e.clientX;
@@ -227,6 +248,176 @@ async function onPointerUp(): Promise<void> {
   await decodeRegion(r);
 }
 
+// ---------------- 自动扫码（多二维码） ----------------
+
+interface FoundQr {
+  text: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** 全屏扫描：zxing 一次检测所有二维码并返回各自坐标（物理像素 → CSS 像素） */
+async function scanAll(): Promise<FoundQr[]> {
+  const img = canvas.getContext("2d")!.getImageData(0, 0, capW, capH);
+  try {
+    const results = await readBarcodes(img, {
+      tryHarder: true,
+      tryRotate: false,
+      tryInvert: true,
+      formats: ["QRCode"],
+    });
+
+    const rx = capCssW / capW;
+    const ry = capCssH / capH;
+    // 不按内容去重：相同内容的二维码也要各自独立展示（每个码都有自己的指向标记）
+    const out: FoundQr[] = [];
+    for (const r of results) {
+      if (!r.text) continue;
+      const xs = [r.position.topLeft.x, r.position.topRight.x, r.position.bottomLeft.x, r.position.bottomRight.x];
+      const ys = [r.position.topLeft.y, r.position.topRight.y, r.position.bottomLeft.y, r.position.bottomRight.y];
+      const px = Math.min(...xs);
+      const py = Math.min(...ys);
+      const w = Math.max(...xs) - px;
+      const h = Math.max(...ys) - py;
+      if (w < 8 || h < 8) continue; // 过滤误检的退化框
+      out.push({ text: r.text, x: px * rx, y: py * ry, w: w * rx, h: h * ry });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+function kindLabel(text: string): string {
+  const k = classify(text);
+  return k === "url" ? "链接" : k === "wifi" ? "WiFi" : "文本";
+}
+
+let panelFromManual = false;
+
+function showMultiResults(list: FoundQr[], fromManual = false): void {
+  panelFromManual = fromManual;
+  qrMarkers.innerHTML = "";
+  multiList.innerHTML = "";
+  multiCount.textContent = String(list.length);
+  list.forEach((it, i) => {
+    const marker = document.createElement("div");
+    marker.className = "qr-marker";
+    marker.style.left = `${it.x - 6}px`;
+    marker.style.top = `${it.y - 6}px`;
+    marker.style.width = `${it.w + 12}px`;
+    marker.style.height = `${it.h + 12}px`;
+    const num = document.createElement("span");
+    num.className = "qr-num";
+    num.textContent = String(i + 1);
+    marker.appendChild(num);
+    qrMarkers.appendChild(marker);
+
+    const li = document.createElement("li");
+    const numEl = document.createElement("span");
+    numEl.className = "qr-num";
+    numEl.textContent = String(i + 1);
+    const text = document.createElement("span");
+    text.className = "m-text";
+    text.textContent = it.text;
+    text.title = it.text;
+    const chip = document.createElement("span");
+    chip.className = "type-chip";
+    chip.textContent = kindLabel(it.text);
+    const copy = document.createElement("button");
+    copy.className = "m-copy";
+    copy.textContent = "复制";
+    copy.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      await invoke("copy_text", { text: it.text });
+      toast("已复制到剪贴板");
+    });
+    li.append(numEl, text, chip, copy);
+
+    // 链接类型：追加「打开」按钮（复用平台引擎：B站深链/夸克客户端/浏览器）
+    const rule = matchPlatform(it.text);
+    const isUrl = /^https?:\/\//i.test(it.text);
+    if (rule || isUrl) {
+      const open = document.createElement("button");
+      open.className = "m-copy";
+      open.textContent = rule ? `在${rule.name}打开` : "打开";
+      open.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        try {
+          await openByPlatform(it.text);
+          toast(rule ? `已在${rule.name}打开` : "已打开");
+          if (settings.openExit || panelFromManual) void exitCapture();
+        } catch (err) {
+          toast(String(err).replace(/^Error invoking remote function '[^']+': /, ""));
+        }
+      });
+      li.appendChild(open);
+    }
+    li.addEventListener("mouseenter", () => marker.classList.add("active"));
+    li.addEventListener("mouseleave", () => marker.classList.remove("active"));
+    multiList.appendChild(li);
+  });
+  multiView.hidden = false;
+}
+
+function hideMultiResults(): void {
+  multiView.hidden = true;
+  qrMarkers.innerHTML = "";
+  multiList.innerHTML = "";
+}
+
+/**
+ * 带重试的解码（zxing-wasm）：白色静区 + 双尺度，返回内容与全画布 CSS 坐标
+ */
+async function decodeWithRetry(
+  source: HTMLCanvasElement | HTMLImageElement,
+  sx: number,
+  sy: number,
+  sw: number,
+  sh: number,
+): Promise<FoundQr | null> {
+  for (const scale of [1, 2]) {
+    const qw = Math.min(Math.round(sw * scale), 2200);
+    const qh = Math.max(1, Math.round(qw * (sh / sw)));
+    const qz = Math.max(16, Math.round(Math.max(qw, qh) * 0.06));
+    decodeCanvas.width = qw + qz * 2;
+    decodeCanvas.height = qh + qz * 2;
+    decodeCtx.fillStyle = "#ffffff";
+    decodeCtx.fillRect(0, 0, decodeCanvas.width, decodeCanvas.height);
+    decodeCtx.imageSmoothingEnabled = scale > 1;
+    decodeCtx.drawImage(source, sx, sy, sw, sh, qz, qz, qw, qh);
+    const img = decodeCtx.getImageData(0, 0, decodeCanvas.width, decodeCanvas.height);
+    try {
+      const results = await readBarcodes(img, {
+        tryHarder: true,
+        tryRotate: true,
+        tryInvert: true,
+        formats: ["QRCode"],
+      });
+      const hit = results.find((r) => r.text);
+      if (hit) {
+        // 解码画布内坐标 → 全画布 CSS 坐标（扣除静区、除以缩放）
+        const rx = capCssW / capW;
+        const ry = capCssH / capH;
+        const px = hit.position.topLeft.x;
+        const py = hit.position.topLeft.y;
+        return {
+          text: hit.text,
+          x: ((qz + px) / scale + sx) * rx,
+          y: ((qz + py) / scale + sy) * ry,
+          w: ((hit.position.bottomRight.x - px) / scale) * rx,
+          h: ((hit.position.bottomRight.y - py) / scale) * ry,
+        };
+      }
+    } catch {
+      // 本尺度失败，继续下一尺度
+    }
+  }
+  return null;
+}
+
 async function decodeRegion(r: { x: number; y: number; w: number; h: number }): Promise<void> {
   if (capW === 0) return;
   const rx = capW / capCssW;
@@ -235,13 +426,16 @@ async function decodeRegion(r: { x: number; y: number; w: number; h: number }): 
   const sy = Math.max(0, Math.round(r.y * ry));
   const sw = Math.min(capW - sx, Math.round(r.w * rx));
   const sh = Math.min(capH - sy, Math.round(r.h * ry));
-  decodeCanvas.width = sw;
-  decodeCanvas.height = sh;
-  decodeCtx.drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh);
-  const img = decodeCtx.getImageData(0, 0, sw, sh);
-  const code = jsQR(img.data, sw, sh, { inversionAttempts: "attemptBoth" });
-  if (code && code.data) {
-    onDetected(code.data, true);
+
+  const hit = await decodeWithRetry(canvas, sx, sy, sw, sh);
+  if (hit) {
+    showSuccessFeedback(true);
+    // 手动框选与自动扫码同款：居中面板 + 位置标记
+    showMultiResults([hit], true);
+    if (settings.autoCopy) {
+      await invoke("copy_text", { text: hit.text });
+      toast("已复制到剪贴板");
+    }
   } else {
     toast("所选区域没有二维码，请重新框选");
     selRect.classList.remove("show");
@@ -274,6 +468,65 @@ function classify(text: string): Kind {
   if (/^https?:\/\//i.test(text)) return "url";
   if (/^WIFI:/i.test(text)) return "wifi";
   return "text";
+}
+
+// ---------------- 平台打开（B站深链 / 夸克客户端 / 支付宝路由） ----------------
+
+interface PlatformRule {
+  id: string;
+  name: string;
+  /** 注册表检测的类/协议（任一存在即视为安装了应用） */
+  schemes: string[];
+  test: RegExp;
+  /** 内容 → 深链/目标 */
+  toDeeplink?: (content: string) => Promise<string>;
+  /** 自定义打开方式（夸克：命令行带 URL 启动客户端） */
+  openVia?: (content: string) => Promise<void>;
+}
+
+const PLATFORM_RULES: PlatformRule[] = [
+  {
+    id: "quark", name: "夸克网盘", schemes: ["QuarkHTM"],
+    test: /pan\.quark\.cn|quark\.cn/i,
+    openVia: async (c) => {
+      await invoke("open_with_quark", { url: c });
+    },
+  },
+  {
+    id: "bilibili", name: "B站", schemes: ["bilibili"],
+    test: /b23\.tv|bilibili\.com/i,
+    toDeeplink: async (c) => {
+      let url = c;
+      if (/b23\.tv/i.test(c)) {
+        try { url = await invoke<string>("resolve_url", { url: c }); } catch { /* 解析失败按原链处理 */ }
+      }
+      const m = /video\/(BV[0-9A-Za-z]+)/i.exec(url);
+      return m ? `bilibili://video/${m[1]}` : "bilibili://";
+    },
+  },
+  {
+    id: "alipay", name: "支付宝", schemes: ["alipay", "alipays"],
+    test: /^(alipay|alipays):\/\//i,
+    toDeeplink: async (c) => c,
+  },
+];
+
+function matchPlatform(content: string): PlatformRule | null {
+  return PLATFORM_RULES.find((r) => r.test.test(content)) ?? null;
+}
+
+/** 按平台规则打开内容（无规则时原样交给系统路由） */
+async function openByPlatform(content: string): Promise<void> {
+  const rule = matchPlatform(content);
+  if (rule?.openVia) {
+    await rule.openVia(content);
+    return;
+  }
+  let target = content;
+  if (rule?.toDeeplink) {
+    target = await rule.toDeeplink(content);
+  }
+  await invoke("open_content", { content: target });
 }
 
 function fillResultSheet(
@@ -374,16 +627,15 @@ async function decodeFile(file: File): Promise<void> {
       img.onerror = () => reject(new Error("图片加载失败"));
       img.src = url;
     });
-    const scale = Math.min(1, 960 / Math.max(img.width, img.height));
-    decodeCanvas.width = Math.round(img.width * scale);
-    decodeCanvas.height = Math.round(img.height * scale);
-    decodeCtx.drawImage(img, 0, 0, decodeCanvas.width, decodeCanvas.height);
-    const data = decodeCtx.getImageData(0, 0, decodeCanvas.width, decodeCanvas.height);
-    const code = jsQR(data.data, decodeCanvas.width, decodeCanvas.height, {
-      inversionAttempts: "attemptBoth",
-    });
-    if (code && code.data) {
-      onDetected(code.data, false);
+    const scale = Math.min(1, 1600 / Math.max(img.width, img.height));
+    const w = Math.max(1, Math.round(img.width * scale));
+    const h = Math.max(1, Math.round(img.height * scale));
+    decodeCanvas.width = w;
+    decodeCanvas.height = h;
+    decodeCtx.drawImage(img, 0, 0, w, h);
+    const hit = await decodeWithRetry(decodeCanvas, 0, 0, w, h);
+    if (hit) {
+      onDetected(hit.text, false);
     } else {
       toast("未在图片中找到二维码");
     }
@@ -418,9 +670,14 @@ function hideMasks(): void {
 // ---------------- 视图切换 / 提示 ----------------
 
 /** 设置页为独立整页：与扫码页互斥显示，并让窗口平滑切换到对应尺寸 */
+let switchTimer = 0;
 function showSettings(on: boolean): void {
   settingsPage.hidden = !on;
   scanApp.hidden = on;
+  // 窗口缩放动画期间关闭毛玻璃合成，避免逐帧模糊造成的卡顿
+  document.body.classList.add("view-switching");
+  window.clearTimeout(switchTimer);
+  switchTimer = window.setTimeout(() => document.body.classList.remove("view-switching"), 320);
   void invoke("set_view", { settings: on });
 }
 
@@ -441,6 +698,8 @@ function syncSettingsUI(): void {
   if (!hotkeyCapturing) hotkeyBtn.textContent = settings.hotkey;
   setSwitch($("sw-autocopy"), settings.autoCopy);
   setSwitch($("sw-sound"), settings.sound);
+  setSwitch($("sw-autoscan"), settings.autoScan);
+  setSwitch($("sw-openexit"), settings.openExit);
   setSwitch($("sw-pin"), settings.alwaysOnTop);
 }
 
@@ -541,6 +800,14 @@ function bindEvents(): void {
     const el = e.currentTarget as HTMLElement;
     void setSetting("sound", !el.classList.contains("on")).then(syncSettingsUI);
   });
+  $("sw-openexit").addEventListener("click", (e) => {
+    const el = e.currentTarget as HTMLElement;
+    void setSetting("openExit", !el.classList.contains("on")).then(syncSettingsUI);
+  });
+  $("sw-autoscan").addEventListener("click", (e) => {
+    const el = e.currentTarget as HTMLElement;
+    void setSetting("autoScan", !el.classList.contains("on")).then(syncSettingsUI);
+  });
   $("sw-pin").addEventListener("click", (e) => {
     const el = e.currentTarget as HTMLElement;
     void setSetting("alwaysOnTop", !el.classList.contains("on")).then(syncSettingsUI);
@@ -585,6 +852,11 @@ function bindEvents(): void {
     }
     if (e.key !== "Escape") return;
     if (captureActive) {
+      if (!multiView.hidden) {
+        hideMultiResults();
+        void exitCapture();
+        return;
+      }
       if (cResultSheet.classList.contains("show")) {
         hideCaptureResult();
         selRect.classList.remove("show");
@@ -627,6 +899,12 @@ function bindEvents(): void {
     if (file) void decodeFile(file);
   });
 
+  // 多结果视图关闭
+  $("multi-close").addEventListener("click", () => {
+    hideMultiResults();
+    void exitCapture();
+  });
+
   // 设置页返回
   $("btn-back").addEventListener("click", () => showSettings(false));
 
@@ -656,5 +934,15 @@ async function init(): Promise<void> {
     /* 忽略 */
   }
 }
+
+// zxing wasm 预热：提前完成初始化（首次调用约 1-2 秒，避免首屏识别时卡顿）
+const warmNoise = new Uint8ClampedArray(64 * 64 * 4);
+for (let i = 0; i < warmNoise.length; i++) warmNoise[i] = (i * 37) % 256;
+void readBarcodes(new ImageData(warmNoise, 64, 64), {
+  tryHarder: false,
+  formats: ["QRCode"],
+}).catch(() => {
+  /* 噪声图解码失败无所谓，wasm 已完成初始化 */
+});
 
 void init();

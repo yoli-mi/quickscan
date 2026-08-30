@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
+mod platform;
 use std::time::Duration;
 use tauri::{
     menu::{Menu, MenuItem},
@@ -23,6 +24,8 @@ struct Settings {
     hotkey: String,
     auto_copy: bool,
     sound: bool,
+    auto_scan: bool,
+    open_exit: bool,
     always_on_top: bool,
 }
 
@@ -32,6 +35,8 @@ impl Default for Settings {
             hotkey: DEFAULT_HOTKEY.into(),
             auto_copy: false,
             sound: true,
+            auto_scan: false,
+            open_exit: false,
             always_on_top: true,
         }
     }
@@ -327,6 +332,8 @@ fn set_setting(
     match key.as_str() {
         "autoCopy" => s.auto_copy = value.as_bool().unwrap_or(s.auto_copy),
         "sound" => s.sound = value.as_bool().unwrap_or(s.sound),
+        "autoScan" => s.auto_scan = value.as_bool().unwrap_or(s.auto_scan),
+        "openExit" => s.open_exit = value.as_bool().unwrap_or(s.open_exit),
         "alwaysOnTop" => {
             s.always_on_top = value.as_bool().unwrap_or(s.always_on_top);
             if let Some(w) = app.get_webview_window("main") {
@@ -483,8 +490,8 @@ fn set_view(app: AppHandle, settings: bool) {
 
     let app = app.clone();
     std::thread::spawn(move || {
-        const FRAMES: usize = 14;
-        const STEP_MS: u64 = 16;
+        const FRAMES: usize = 10;
+        const STEP_MS: u64 = 20;
         for i in 1..=FRAMES {
             if VIEW_GEN.load(Ordering::SeqCst) != gen {
                 return; // 已被更新的切换接管
@@ -553,6 +560,10 @@ pub fn run() {
             set_hotkey,
             copy_text,
             open_url,
+            platform::open_content,
+            platform::is_scheme_registered,
+            platform::resolve_url,
+            platform::open_with_quark,
             hide_window,
             enter_capture_mode,
             exit_capture_mode,
