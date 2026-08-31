@@ -20,6 +20,7 @@
 ## 功能
 
 - **截屏框选识别**：全屏覆盖 + 拖拽选区（实时尺寸标注），松手即识别
+- **多屏支持**：遮罩铺满所有显示器，可跨屏拖拽框选；小部件在鼠标所在的那块屏上呼出
 - 结果自动分类：链接 / WiFi / 文本；一键复制、浏览器打开
 - **全局快捷键**呼出 / 收起（默认 `Ctrl+Alt+Q`；设置中点击后直接按下新组合键即生效）
 - 极简风格动效
@@ -30,7 +31,7 @@
 
 - **Tauri 2**（Rust + WebView2）：安装包 **~1.4 MB**，驻留内存 **~30 MB**
 - 原生 TypeScript + Vite，零前端框架；jsQR 解码（仅对框选区域解码）
-- 截屏：`xcap` 抓主屏 RGBA 直传（无图片编码开销），用完即删、画布即释
+- 截屏：`xcap` 逐屏抓取后按物理坐标拼成覆盖整个虚拟桌面的 RGBA 直传（无图片编码开销），用完即删、画布即释
 - 动画只走 `transform` / `opacity`（GPU 合成）；`prefers-reduced-motion` 自动降级
 - release 构建：`opt-level=z` + LTO + strip + `panic=abort`
 - 设置本地 JSON 持久化，零数据库依赖
@@ -67,6 +68,7 @@ You can also paste (`Ctrl+V`) or drag an image with a QR code onto the widget.
 ## Features
 
 - **Screen-capture selection**: fullscreen overlay with drag selection (live size hint), decode on release
+- **Multi-monitor**: the overlay spans every display, so selections can be dragged across screens; the widget pops up on whichever monitor the cursor is on
 - Auto classification: URL / Wi-Fi / text; one-click copy and open-in-browser
 - **Global hotkey** to show/hide (default `Ctrl+Alt+Q`; in settings, click and press a new combo — applied instantly)
 - Minimalist motion design
@@ -77,7 +79,7 @@ You can also paste (`Ctrl+V`) or drag an image with a QR code onto the widget.
 
 - **Tauri 2** (Rust + WebView2): installer **~1.4 MB**, resident memory **~30 MB**
 - Plain TypeScript + Vite, zero frontend framework; jsQR decodes only the selected region
-- Capture: raw RGBA via `xcap` (no image-encoding overhead); temp file deleted right after use, canvas released on exit
+- Capture: every monitor grabbed via `xcap` and stitched by physical coordinates into one virtual-desktop RGBA buffer (no image-encoding overhead); temp file deleted right after use, canvas released on exit
 - Animations use only `transform` / `opacity` (GPU-composited); honors `prefers-reduced-motion`
 - Release build: `opt-level=z` + LTO + strip + `panic=abort`
 - Settings persisted as local JSON — no database

@@ -78,20 +78,128 @@ fn save_settings(app: &AppHandle, s: &Settings) {
     }
 }
 
+// ---------------- 多屏 ----------------
+
+/// 鼠标指针所在的显示器；取不到时回退主屏。
+/// 多屏下用户在哪块屏上呼出，QuickScan 就在哪块屏上工作。
+fn active_monitor(app: &AppHandle) -> Option<tauri::Monitor> {
+    app.cursor_position()
+        .ok()
+        .and_then(|p| app.monitor_from_point(p.x, p.y).ok().flatten())
+        .or_else(|| app.primary_monitor().ok().flatten())
+}
+
+/// 小部件当前归属的显示器：以窗口自身所在屏为准，其次鼠标所在屏，最后主屏。
+/// 收起动画、视图切换必须跟着窗口走，否则窗口会横跨屏幕飞出去。
+fn window_monitor(app: &AppHandle) -> Option<tauri::Monitor> {
+    app.get_webview_window("main")
+        .and_then(|w| w.current_monitor().ok().flatten())
+        .or_else(|| active_monitor(app))
+}
+
 // ---------------- 屏幕截取 ----------------
 
-/// 截取主屏并写入缓存文件，返回 (文件路径, 宽, 高)
-fn capture_screen_to_file(app: &AppHandle) -> Result<(String, u32, u32), String> {
-    let monitors = xcap::Monitor::all().map_err(|e| e.to_string())?;
-    // 明确选主显示器（机器上可能有虚拟显示器，first() 不一定是主屏）
-    let monitor = monitors
-        .iter()
-        .find(|m| m.is_primary().unwrap_or(false))
-        .or_else(|| monitors.first())
-        .ok_or("未找到显示器")?;
-    let image = monitor.capture_image().map_err(|e| e.to_string())?;
-    let (w, h) = image.dimensions();
-    let raw = image.into_raw();
+/// 截屏代数：新的截屏使旧截屏的清理线程失效
+static CAPTURE_GEN: AtomicU64 = AtomicU64::new(0);
+
+/// 覆盖所有显示器的虚拟桌面包围盒（物理像素）
+struct VirtualDesktop {
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+}
+
+/// 计算虚拟桌面包围盒。
+/// 一律用 Tauri 的物理坐标：xcap 的 x()/y() 返回逻辑坐标而 width()/height() 返回物理像素，
+/// 两者混用会在缩放不一致的多屏上把画面拼错位。
+fn virtual_desktop(app: &AppHandle) -> Result<VirtualDesktop, String> {
+    let monitors = app.available_monitors().map_err(|e| e.to_string())?;
+    if monitors.is_empty() {
+        return Err("未找到显示器".into());
+    }
+    let (mut min_x, mut min_y) = (i32::MAX, i32::MAX);
+    let (mut max_x, mut max_y) = (i32::MIN, i32::MIN);
+    for m in &monitors {
+        let (p, s) = (m.position(), m.size());
+        min_x = min_x.min(p.x);
+        min_y = min_y.min(p.y);
+        max_x = max_x.max(p.x + s.width as i32);
+        max_y = max_y.max(p.y + s.height as i32);
+    }
+    Ok(VirtualDesktop {
+        x: min_x,
+        y: min_y,
+        width: (max_x - min_x) as u32,
+        height: (max_y - min_y) as u32,
+    })
+}
+
+/// 把一块屏的截图按物理坐标贴进大画布，越界部分裁掉
+fn blit(canvas: &mut [u8], cw: u32, ch: u32, src: &[u8], sw: u32, sh: u32, dx: i32, dy: i32) {
+    // 逐行裁剪后整行拷贝：跨屏一次 copy_from_slice 比逐像素快一个数量级
+    let x0 = dx.max(0);
+    let x1 = (dx + sw as i32).min(cw as i32);
+    if x1 <= x0 {
+        return;
+    }
+    let span = (x1 - x0) as usize * 4;
+    for row in 0..sh {
+        let ty = dy + row as i32;
+        if ty < 0 || ty >= ch as i32 {
+            continue;
+        }
+        let src_off = (row as usize * sw as usize + (x0 - dx) as usize) * 4;
+        let dst_off = (ty as usize * cw as usize + x0 as usize) * 4;
+        // 截图尺寸与显示器报告尺寸万一不一致时不 panic，跳过该行
+        if src_off + span > src.len() || dst_off + span > canvas.len() {
+            continue;
+        }
+        canvas[dst_off..dst_off + span].copy_from_slice(&src[src_off..src_off + span]);
+    }
+}
+
+/// 截取全部显示器并拼成一张覆盖虚拟桌面的图，写入缓存文件，返回 (文件路径, 宽, 高)
+fn capture_screen_to_file(
+    app: &AppHandle,
+    desktop: &VirtualDesktop,
+) -> Result<(String, u32, u32), String> {
+    let (bw, bh) = (desktop.width, desktop.height);
+    let mut canvas = vec![0u8; bw as usize * bh as usize * 4];
+    // 显示器错位排列时包围盒里会有没有屏幕的空隙，填不透明黑（与系统截图工具一致）
+    for px in canvas.chunks_exact_mut(4) {
+        px[3] = 255;
+    }
+
+    let shots = xcap::Monitor::all().map_err(|e| e.to_string())?;
+    let monitors = app.available_monitors().map_err(|e| e.to_string())?;
+    let mut captured = 0usize;
+    for mon in &monitors {
+        // 按设备名配对：xcap 与 tao 在 Windows 上都取 MONITORINFOEXW.szDevice，
+        // 名字一致即同一块屏——不必在两套坐标系/缩放之间做换算
+        let shot = mon
+            .name()
+            .and_then(|want| shots.iter().find(|s| s.name().is_ok_and(|n| &n == want)));
+        // 单块屏抓不到（如受保护内容、休眠中的屏）不该让整次截屏失败，留黑继续
+        let Some(shot) = shot else { continue };
+        let Ok(image) = shot.capture_image() else { continue };
+        let (sw, sh) = (image.width(), image.height());
+        let p = mon.position();
+        blit(
+            &mut canvas,
+            bw,
+            bh,
+            image.as_raw(),
+            sw,
+            sh,
+            p.x - desktop.x,
+            p.y - desktop.y,
+        );
+        captured += 1;
+    }
+    if captured == 0 {
+        return Err("所有显示器都截取失败".into());
+    }
 
     let cache_dir = app
         .path()
@@ -99,86 +207,95 @@ fn capture_screen_to_file(app: &AppHandle) -> Result<(String, u32, u32), String>
         .map_err(|e| format!("无法定位缓存目录: {e}"))?;
     std::fs::create_dir_all(&cache_dir).map_err(|e| e.to_string())?;
     let path = cache_dir.join("quickscan-capture.rgba");
-    std::fs::write(&path, raw).map_err(|e| e.to_string())?;
-    // 前端异步拉取后清理缓存文件（约 8MB，不留盘）
+    std::fs::write(&path, canvas).map_err(|e| e.to_string())?;
+    // 前端异步拉取后清理缓存文件（不留盘）。多屏拼图可达数十 MB，
+    // 留够前端 fetch 的时间，否则大图会在读完之前被删掉。
+    // 代数守卫：等待期间又截了一次的话，这一轮就不要去删别人刚写好的同名文件
+    let gen = CAPTURE_GEN.fetch_add(1, Ordering::SeqCst) + 1;
     let cleanup = path.clone();
     std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(3000));
-        let _ = std::fs::remove_file(&cleanup);
+        std::thread::sleep(Duration::from_millis(8000));
+        if CAPTURE_GEN.load(Ordering::SeqCst) == gen {
+            let _ = std::fs::remove_file(&cleanup);
+        }
     });
-    Ok((path.to_string_lossy().into_owned(), w, h))
+    Ok((path.to_string_lossy().into_owned(), bw, bh))
 }
 
 // ---------------- 窗口控制 ----------------
 
-/// 主屏上某逻辑宽度窗口的顶部居中位置
-fn centered_position(app: &AppHandle, logical_w: u32) -> Option<(i32, i32)> {
-    let mon = app.primary_monitor().ok().flatten()?;
+/// 给定显示器上某逻辑宽度窗口的顶部居中位置
+fn centered_position(mon: &tauri::Monitor, logical_w: u32) -> (i32, i32) {
     let area = mon.work_area();
     let sf = mon.scale_factor();
     let w = (logical_w as f64 * sf) as u32;
     let x = area.position.x + (area.size.width.saturating_sub(w)) as i32 / 2;
     let y = area.position.y + 48;
-    Some((x, y))
+    (x, y)
 }
 
-/// 主屏上小部件的最终位置（顶部居中）
-fn widget_position(app: &AppHandle) -> Option<(i32, i32)> {
-    centered_position(app, WIDGET_SIZE.0)
+/// 小部件在给定显示器上的最终位置（顶部居中）
+fn widget_position(mon: &tauri::Monitor) -> (i32, i32) {
+    centered_position(mon, WIDGET_SIZE.0)
 }
 
-/// 按已知小部件尺寸（×主屏缩放系数）计算顶部居中位置
-/// 用 primary_monitor 而非 current_monitor：隐藏/移动中的窗口 current_monitor 不稳定
-fn position_widget(app: &AppHandle) {
-    if let Some((x, y)) = widget_position(app) {
-        if let Some(win) = app.get_webview_window("main") {
-            let _ = win.set_position(Position::Physical(PhysicalPosition::new(x, y)));
-        }
+/// 把小部件摆到给定显示器的顶部居中
+fn position_widget(app: &AppHandle, mon: &tauri::Monitor) {
+    let (x, y) = widget_position(mon);
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.set_position(Position::Physical(PhysicalPosition::new(x, y)));
     }
 }
 
-fn resize_widget(app: &AppHandle) {
-    if let Ok(Some(mon)) = app.primary_monitor() {
-        let sf = mon.scale_factor();
-        if let Some(win) = app.get_webview_window("main") {
-            let _ = win.set_size(Size::Physical(PhysicalSize::new(
-                (WIDGET_SIZE.0 as f64 * sf) as u32,
-                (WIDGET_SIZE.1 as f64 * sf) as u32,
-            )));
-        }
+/// 按已知小部件尺寸 × 该显示器的缩放系数设置窗口大小
+/// 用显示器自身的 scale_factor：多屏可能各有各的 DPI，套主屏的会大小失真
+fn resize_widget(app: &AppHandle, mon: &tauri::Monitor) {
+    let sf = mon.scale_factor();
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.set_size(Size::Physical(PhysicalSize::new(
+            (WIDGET_SIZE.0 as f64 * sf) as u32,
+            (WIDGET_SIZE.1 as f64 * sf) as u32,
+        )));
     }
 }
 
-/// 主屏工作区右下角（托盘区上方）——呼出的起点 / 收起的终点
-/// 尺寸取窗口实际值（扫码/设置两视图宽度高度不同）
-fn tray_corner(app: &AppHandle, fallback: (i32, i32)) -> (i32, i32) {
-    let w_ok = app.primary_monitor().ok().flatten();
-    let size = app
-        .get_webview_window("main")
-        .and_then(|w| w.inner_size().ok())
-        .map(|s| (s.width as i32, s.height as i32));
-    if let (Some(mon), Some((w, h))) = (w_ok, size) {
-        if w > 0 && h > 0 {
-            let area = mon.work_area();
-            return (
-                area.position.x + area.size.width as i32 - w - 8,
-                area.position.y + area.size.height as i32 - h - 8,
-            );
-        }
+/// 给定显示器工作区的右下角（托盘区上方）——呼出的起点 / 收起的终点
+/// 尺寸由调用方给出（扫码/设置两视图宽高不同），避免依赖"必须先 resize 再算"的隐式顺序
+fn tray_corner(mon: &tauri::Monitor, size: (i32, i32), fallback: (i32, i32)) -> (i32, i32) {
+    let (w, h) = size;
+    if w > 0 && h > 0 {
+        let area = mon.work_area();
+        return (
+            area.position.x + area.size.width as i32 - w - 8,
+            area.position.y + area.size.height as i32 - h - 8,
+        );
     }
     fallback
+}
+
+/// 小部件在给定显示器上的物理尺寸
+fn widget_physical_size(mon: &tauri::Monitor) -> (i32, i32) {
+    let sf = mon.scale_factor();
+    (
+        (WIDGET_SIZE.0 as f64 * sf) as i32,
+        (WIDGET_SIZE.1 as f64 * sf) as i32,
+    )
 }
 
 /// 呼出：窗口从右下角托盘区弹入到顶部居中（easeOutCubic 位置动画）
 fn show_window(app: &AppHandle) {
     app.state::<AppState>().window_shown.store(true, Ordering::SeqCst);
     let Some(win) = app.get_webview_window("main") else { return };
-    resize_widget(app);
+    // 呼出到鼠标所在那块屏（多屏用户不必先把鼠标挪回主屏）
+    let Some(mon) = active_monitor(app) else { return };
 
-    let (end_x, end_y) = widget_position(app).unwrap_or((685, 48));
-    let (start_x, start_y) = tray_corner(app, (end_x, end_y));
+    let (end_x, end_y) = widget_position(&mon);
+    let (start_x, start_y) = tray_corner(&mon, widget_physical_size(&mon), (end_x, end_y));
 
+    // 先落位再定尺寸：跨屏移动会触发 WM_DPICHANGED，
+    // 顺序反了的话按目标屏 DPI 算好的尺寸会被这次移动覆写
     let _ = win.set_position(Position::Physical(PhysicalPosition::new(start_x, start_y)));
+    resize_widget(app, &mon);
     let _ = win.show();
     let _ = win.set_focus();
     let _ = app.emit("scan-window-shown", ());
@@ -216,7 +333,17 @@ fn hide_window_smooth(app: &AppHandle) {
     app.state::<AppState>().window_shown.store(false, Ordering::SeqCst);
     *app.state::<AppState>().capture_active.lock().unwrap() = false;
 
-    let (target_x, target_y) = tray_corner(app, widget_position(app).unwrap_or((685, 48)));
+    // 收回窗口自己所在那块屏的托盘角，而不是主屏——否则副屏上的窗口会横穿桌面飞走
+    let mon = window_monitor(app);
+    let size = app
+        .get_webview_window("main")
+        .and_then(|w| w.inner_size().ok())
+        .map(|s| (s.width as i32, s.height as i32))
+        .unwrap_or((0, 0));
+    let (target_x, target_y) = match &mon {
+        Some(m) => tray_corner(m, size, widget_position(m)),
+        None => (685, 48),
+    };
     // 起点：当前窗口位置（可能是动画中途被再次呼出再收起，也能平滑衔接）
     let (start_x, start_y) = app
         .get_webview_window("main")
@@ -401,25 +528,26 @@ fn hide_window(app: AppHandle) {
     hide_window_smooth(&app);
 }
 
-/// 进入截屏框选模式：先隐藏小部件再截屏（避免 UI 进入截图），随后铺满主屏显示
+/// 进入截屏框选模式：先隐藏小部件再截屏（避免 UI 进入截图），随后铺满整个虚拟桌面显示
 #[tauri::command]
 fn enter_capture_mode(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let Some(win) = app.get_webview_window("main") else {
         return Err("窗口不存在".into());
     };
+    // 包围盒要在 hide() 之前算好，隐藏是异步的，别让它插在中间
+    let desktop = virtual_desktop(&app)?;
     // 关键：先隐藏小部件，截屏画面里就不会有小部件本身
     state.window_shown.store(false, Ordering::SeqCst);
     let hide_result = win.hide();
     eprintln!("[quickscan] capture: hide result: {hide_result:?}");
     // 等窗口真正从合成器移除（隐藏是异步生效的，立即截屏会拍到残留的壳）
     std::thread::sleep(Duration::from_millis(250));
-    let (path, w, h) = capture_screen_to_file(&app)?;
-    let Some(mon) = win.current_monitor().map_err(|e| e.to_string())? else {
-        return Err("未找到显示器".into());
-    };
+    // 截全部显示器：遮罩层随后铺满整个虚拟桌面，两者必须是同一个矩形
+    let (path, w, h) = capture_screen_to_file(&app, &desktop)?;
     let _ = win.set_always_on_top(true);
-    let _ = win.set_position(Position::Physical(*mon.position()));
-    let _ = win.set_size(Size::Physical(*mon.size()));
+    // 先落位再定尺寸：跨屏移动会触发 WM_DPICHANGED，顺序反了尺寸会被覆写
+    let _ = win.set_position(Position::Physical(PhysicalPosition::new(desktop.x, desktop.y)));
+    let _ = win.set_size(Size::Physical(PhysicalSize::new(desktop.width, desktop.height)));
     *state.capture_active.lock().unwrap() = true;
     let _ = win.show();
     let _ = win.set_focus();
@@ -432,10 +560,14 @@ fn enter_capture_mode(app: AppHandle, state: State<'_, AppState>) -> Result<(), 
 fn exit_capture_mode(app: AppHandle, state: State<'_, AppState>) {
     *state.capture_active.lock().unwrap() = false;
     if let Some(win) = app.get_webview_window("main") {
-        resize_widget(&app);
+        // 此刻窗口还是铺满整个虚拟桌面的遮罩层，current_monitor 已无意义，
+        // 缩回鼠标所在那块屏——用户刚在那儿框完，视线就在那里
+        if let Some(mon) = active_monitor(&app) {
+            resize_widget(&app, &mon);
+            position_widget(&app, &mon);
+        }
         let on_top = state.settings.lock().unwrap().always_on_top;
         let _ = win.set_always_on_top(on_top);
-        position_widget(&app);
     }
     hide_window_smooth(&app);
 }
@@ -472,12 +604,9 @@ static VIEW_GEN: AtomicU64 = AtomicU64::new(0);
 fn set_view(app: AppHandle, settings: bool) {
     let gen = VIEW_GEN.fetch_add(1, Ordering::SeqCst) + 1;
     let Some(win) = app.get_webview_window("main") else { return };
-    let sf = app
-        .primary_monitor()
-        .ok()
-        .flatten()
-        .map(|m| m.scale_factor())
-        .unwrap_or(1.0);
+    // 在窗口自己所在那块屏上换视图（用主屏的缩放系数会让副屏上的窗口尺寸失真）
+    let mon = window_monitor(&app);
+    let sf = mon.as_ref().map(|m| m.scale_factor()).unwrap_or(1.0);
 
     let target = if settings { SETTINGS_SIZE } else { WIDGET_SIZE };
     let (to_w, to_h) = (
@@ -486,7 +615,10 @@ fn set_view(app: AppHandle, settings: bool) {
     );
     let from_size = win.inner_size().map(|s| (s.width as i32, s.height as i32)).unwrap_or((to_w, to_h));
     let from_pos = win.outer_position().map(|p| (p.x, p.y)).ok();
-    let to_pos = centered_position(&app, target.0).unwrap_or_else(|| from_pos.unwrap_or((0, 0)));
+    let to_pos = mon
+        .as_ref()
+        .map(|m| centered_position(m, target.0))
+        .unwrap_or_else(|| from_pos.unwrap_or((0, 0)));
 
     let app = app.clone();
     std::thread::spawn(move || {
